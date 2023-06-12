@@ -13,13 +13,13 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        rust = fenix.packages.${system}.complete.toolchain;
-      in {
+        rust_toolchain = fenix.packages.${system}.complete.toolchain;
+      in with pkgs; {
         nixpkgs.overlays = [ fenix.overlays.complete ];
-        devShells.default = pkgs.mkShell rec {
+        devShells.default = mkShell rec {
 
 
-          nativeBuildInputs = with pkgs; [
+          nativeBuildInputs =  [
             pkg-config
             cmake
             pkg-config
@@ -29,19 +29,20 @@
           ];
 
           buildInputs = [
-            rust
-            pkgs.lldb_15
-            pkgs.sccache
-            pkgs.sccache
-            pkgs.udev
-            pkgs.alsa-lib
-            pkgs.vulkan-loader
-            pkgs.xorg.libX11
-            pkgs.xorg.libXcursor
-            pkgs.xorg.libXi
-            pkgs.xorg.libXrandr
-            pkgs.libxkbcommon
-            pkgs.wayland
+            rust_toolchain
+            lldb_15
+            sccache
+            sccache
+            udev
+            alsa-lib
+            vulkan-loader
+            xorg.libX11
+            xorg.libXcursor
+            xorg.libXi
+            xorg.libXrandr
+            libxkbcommon
+            wayland
+            wasm-bindgen-cli
           ];
           LD_LIBRARY_PATH = nixpkgs.lib.makeLibraryPath buildInputs;
         };
