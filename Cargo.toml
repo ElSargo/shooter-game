@@ -12,11 +12,13 @@ opt-level = 3
 [dependencies]
 bevy = {version = "0.10.0", features = ["wayland",  "hdr",  "png",   "jpeg",  "bmp", "ktx2",  ]}
 bevy-inspector-egui = "0.18.1"
-bevy_prototype_debug_lines = { version = "*", features = ["3d"] }
 bevy_fly_camera = "0.10.0"
 fast-surface-nets = "0.2.0"
 ordered-float = "3.6.0"
 itertools = "*"
 rand = "0.8.5"
 anyhow = "1.0.71"
+bevy_prototype_debug_lines = "0.10.2"
+bytemuck = "1.13.1"
+# bevy_prototype_debug_lines = {version = "0.10.2", features = ["3d"]}
 

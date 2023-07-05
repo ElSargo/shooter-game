@@ -1,17 +1,20 @@
+use anyhow::Result;
 use bevy::{
     core_pipeline::tonemapping::Tonemapping,
     math::{vec2, Vec3Swizzles},
     render::render_resource::Extent3d,
     window::CursorGrabMode,
 };
-
-use anyhow::Result;
 use bevy::{input::mouse::MouseMotion, math::vec3, prelude::*};
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
+use critter::{make_cirtter, Critter};
 
 use main_material::MainMaterial;
 use rand::{rngs::ThreadRng, thread_rng, Rng};
 const SCENE_LENGTH: usize = 30;
 
+mod critter;
+mod instance;
 mod main_material;
 mod skybox;
 
@@ -21,45 +24,37 @@ fn main() {
             watch_for_changes: true,
             ..Default::default()
         }))
-        // .add_plugins(DefaultPlugins)
+        .add_plugin(WorldInspectorPlugin::default())
+        .add_plugin(critter::CritterPlugin)
         .add_plugin(skybox::SkyboxPlugin)
         .add_plugin(main_material::MainMaterialPlugin)
+        // .add_plugin(instance::CustomMaterialPlugin)
+        // .add_system(instance::setup)
         .add_startup_system(setup)
         .add_system(physics)
         .add_system(keyboard_input)
-        .add_system(cursor_grab_system)
+        .add_system(update_critter_velocity)
+        // .add_system(cursor_grab_system)
         .add_system(mouse_motion)
         .run();
 }
 
+// fn main() {
+//     instance::main();
+// }
 /// set up a simple 3D scene
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MainMaterial>>,
-    mut images: ResMut<Assets<Image>>,
+    images: ResMut<Assets<Image>>,
 ) {
     let plane = meshes.add(shape::Plane::from_size(SCENE_LENGTH as f32).into());
 
     let mut rng = thread_rng();
-    let data: [[f32; SCENE_LENGTH]; SCENE_LENGTH] = fun_name(&mut rng);
-    let box_texture = images.add(Image::new(
-        Extent3d {
-            width: SCENE_LENGTH as u32,
-            height: SCENE_LENGTH as u32,
-            depth_or_array_layers: 1,
-        },
-        bevy::render::render_resource::TextureDimension::D2,
-        {
-            let coords = 0..SCENE_LENGTH;
-            coords
-                .clone()
-                .flat_map(|x| coords.clone().map(move |y| (x, y)))
-                .flat_map(|(x, y)| data[y][x].to_ne_bytes())
-                .collect()
-        },
-        bevy::render::render_resource::TextureFormat::R32Float,
-    ));
+    let data: [[f32; SCENE_LENGTH]; SCENE_LENGTH] = random_scene(&mut rng);
+    let box_texture = array_to_texture(images, data);
+
     let white_material = materials.add(MainMaterial {
         color: Color::rgb(1.0, 1.0, 1.0),
         boxes: Some(box_texture.clone()),
@@ -67,25 +62,14 @@ fn setup(
     });
 
     let blue_material = materials.add(MainMaterial {
-        color: Color::Rgba {
-            red: 0.4,
-            green: 0.4,
-            blue: 1.0,
-            alpha: 1.0,
-        },
+        color: Color::rgb(0.4, 0.4, 1.0),
         boxes: Some(box_texture.clone()),
         ..default()
     });
 
     let red_material = materials.add(MainMaterial {
-        color: Color::Rgba {
-            red: 1.0,
-            green: 0.4,
-            blue: 0.4,
-            alpha: 1.0,
-        },
+        color: Color::rgb(1.0, 0.4, 0.4),
         boxes: Some(box_texture.clone()),
-
         ..default()
     });
     // plane
@@ -103,6 +87,61 @@ fn setup(
             .with_scale(vec3(0.5, 1.0, 1.0)),
         ..default()
     });
+    let player_body = make_cirtter(&mut commands, white_material.clone(), &mut meshes);
+    make_player(&mut commands, &[player_body]);
+    // make_player(&mut commands, &[]);
+
+    let mesh = meshes.add(Mesh::from(shape::Cube { size: 1.001 }));
+    place_cubes(mesh, data, &mut commands, white_material);
+
+    commands.insert_resource(SceneData { blocks: data });
+}
+
+fn update_critter_velocity(
+    physics_havers: Query<(&Children, &Physics)>,
+    mut critters: Query<&mut Critter>,
+) {
+    for (children, physics) in physics_havers.iter() {
+        for child in children {
+            let _ = critters
+                .get_mut(*child)
+                .map(|mut crit| crit.velocity = physics.velocity);
+        }
+    }
+}
+
+fn place_cubes(
+    mesh: Handle<Mesh>,
+    data: [[f32; SCENE_LENGTH]; SCENE_LENGTH],
+    commands: &mut Commands,
+    material: Handle<MainMaterial>,
+) {
+    for x in 0..SCENE_LENGTH {
+        for y in 0..SCENE_LENGTH {
+            let pos = (vec2(x as f32, y as f32) / SCENE_LENGTH as f32 - 0.5) * SCENE_LENGTH as f32;
+            let value = data[x][y];
+            if value > 0.6 {
+                let box_height = value * 0.5;
+                commands.spawn((
+                    Cube {
+                        x: x as usize,
+                        y: y as usize,
+                    },
+                    MaterialMeshBundle {
+                        mesh: mesh.clone(),
+
+                        material: material.clone(),
+                        transform: Transform::from_xyz(pos.x + 0.5, box_height, pos.y + 0.5)
+                            .with_scale(vec3(1.0, value, 1.0)),
+                        ..default()
+                    },
+                ));
+            };
+        }
+    }
+}
+
+fn make_player(commands: &mut Commands, children: &[Entity]) {
     let camera_id = commands
         .spawn(Camera3dBundle {
             camera: Camera {
@@ -126,31 +165,13 @@ fn setup(
         ))
         .insert_children(0, &[camera_id])
         .id();
-    let player_children = [
-        commands
-            .spawn(MaterialMeshBundle {
-                mesh: meshes.add(Mesh::from(shape::Box {
-                    min_x: -0.125,
-                    max_x: 0.125,
-                    min_y: -0.125,
-                    max_y: 0.125,
-                    min_z: -0.125,
-                    max_z: 0.125,
-                })),
+    let player_children = [&[gimble_id], children].concat();
 
-                material: white_material.clone(),
-
-                transform: Transform::from_xyz(0.0, 0.125, 0.0),
-                ..default()
-            })
-            .id(),
-        gimble_id,
-    ];
     let player = commands
         .spawn((
             Physics::default(),
             TransformBundle {
-                local: Transform::from_xyz(0.0, 10., 0.0),
+                local: Transform::from_xyz(0.0, 1., 0.0),
                 ..default()
             },
             VisibilityBundle::default(),
@@ -163,34 +184,34 @@ fn setup(
         gimble_id,
         camera_id,
     });
-    // camera
-    // let nearest = gen_nearest(data);
-    let mesh = meshes.add(Mesh::from(shape::Cube { size: 1.001 }));
-    for x in 0..SCENE_LENGTH {
-        for y in 0..SCENE_LENGTH {
-            let pos = (vec2(x as f32, y as f32) / SCENE_LENGTH as f32 - 0.5) * SCENE_LENGTH as f32;
-            let value = data[x][y];
-            if value > 0.6 {
-                let box_height = value * 0.5;
-                commands.spawn((
-                    Cube {
-                        x: x as usize,
-                        y: y as usize,
-                    },
-                    MaterialMeshBundle {
-                        mesh: mesh.clone(),
+}
 
-                        material: white_material.clone(),
-                        transform: Transform::from_xyz(pos.x + 0.5, box_height, pos.y + 0.5)
-                            .with_scale(vec3(1.0, value, 1.0)),
-                        ..default()
-                    },
-                ));
-            };
-        }
-    }
+// fn make_player(
 
-    commands.insert_resource(SceneData { blocks: data });
+// )
+
+fn array_to_texture(
+    mut images: ResMut<Assets<Image>>,
+    data: [[f32; SCENE_LENGTH]; SCENE_LENGTH],
+) -> Handle<Image> {
+    let box_texture = images.add(Image::new(
+        Extent3d {
+            width: SCENE_LENGTH as u32,
+            height: SCENE_LENGTH as u32,
+            depth_or_array_layers: 1,
+        },
+        bevy::render::render_resource::TextureDimension::D2,
+        {
+            let coords = 0..SCENE_LENGTH;
+            coords
+                .clone()
+                .flat_map(|x| coords.clone().map(move |y| (x, y)))
+                .flat_map(|(x, y)| data[y][x].to_ne_bytes())
+                .collect()
+        },
+        bevy::render::render_resource::TextureFormat::R32Float,
+    ));
+    box_texture
 }
 
 #[derive(Debug, Component, Reflect, Clone, Copy)]
@@ -221,7 +242,7 @@ struct Cube {
 //     result
 // }
 
-fn fun_name(rng: &mut ThreadRng) -> [[f32; SCENE_LENGTH]; SCENE_LENGTH] {
+fn random_scene(rng: &mut ThreadRng) -> [[f32; SCENE_LENGTH]; SCENE_LENGTH] {
     let mut data = [[0.0; SCENE_LENGTH]; SCENE_LENGTH];
     for tile in data.iter_mut().map(|slice| slice.iter_mut()).flatten() {
         *tile = rng.gen_range(0.0..1.0);
@@ -229,7 +250,7 @@ fn fun_name(rng: &mut ThreadRng) -> [[f32; SCENE_LENGTH]; SCENE_LENGTH] {
     data
 }
 
-#[derive(Resource, Debug)]
+#[derive(Resource, Debug, Reflect)]
 struct SceneData<const I: usize> {
     blocks: [[f32; I]; I],
 }
@@ -310,25 +331,25 @@ fn keyboard_input(
                 1.0
             }
         } else {
-            0.5
-        } * 50.0;
+            0.2
+        } * 20.0;
         if keys.pressed(KeyCode::W) {
             vel += transform.forward();
         }
         if keys.pressed(KeyCode::A) {
-            vel += transform.left();
+            vel += transform.left() * 0.5;
         }
         if keys.pressed(KeyCode::S) {
             vel += transform.back();
         }
         if keys.pressed(KeyCode::D) {
-            vel += transform.right();
+            vel += transform.right() * 0.5;
         }
         physics.velocity += vel * delta * speed;
 
         if keys.just_pressed(KeyCode::Space) {
             if physics.on_ground {
-                physics.velocity.y += 3.0; // Space was pressed
+                physics.velocity.y += 2.0; // Space was pressed
                 physics.on_ground = false;
             }
         }

@@ -3062,6 +3062,7 @@ dependencies = [
  "bevy-inspector-egui",
  "bevy_fly_camera",
  "bevy_prototype_debug_lines",
+ "bytemuck",
  "fast-surface-nets",
  "itertools",
  "ordered-float",
